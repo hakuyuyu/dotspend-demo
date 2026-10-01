@@ -9,4 +9,4 @@ The full product is available as a one-time purchase:
 
 **Get DotSpend ($49 one-time):** https://vittoriali.gumroad.com/l/dotspend
 
-by vittoriali
+by Haku
