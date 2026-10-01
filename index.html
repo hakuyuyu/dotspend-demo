@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DotSpend — unattended cost estimator · by vittoriali</title>
+<meta name="description" content="Project what an always-on agent costs while you're away. Per-agent caps, hard 402 cutoffs, kill switch. By vittoriali.">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    background: #0b0e14; color: #e6e9f0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; line-height: 1.5;
+  }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h1 .dot { color: #4ade80; }
+  h2 { font-size: 1rem; margin: 0 0 8px; }
+  .muted { color: #8b93a7; }
+  .card { border: 1px solid #232838; border-radius: 12px; padding: 18px;
+          margin: 16px 0; background: #11151f; }
+  .grid { display: grid; gap: 14px; }
+  label { display: block; font-size: .85rem; color: #b7bdd0; margin-bottom: 6px; }
+  input[type=range] { width: 100%; accent-color: #3b82f6; }
+  select {
+    width: 100%; background: #0b0e14; color: #e6e9f0; border: 1px solid #2b3242;
+    border-radius: 8px; padding: 10px; font: inherit;
+  }
+  .val { color: #7aa2f7; font-weight: 700; }
+  .big { font-size: 2.4rem; font-weight: 800; letter-spacing: -.02em; }
+  .red { color: #f87171; } .green { color: #4ade80; } .amber { color: #fbbf24; }
+  .bar { height: 10px; border-radius: 6px; background: #232838; overflow: hidden; margin: 10px 0; }
+  .bar > div { height: 100%; background: linear-gradient(90deg, #3b82f6, #f87171);
+               width: 0%; transition: width .2s; }
+  .cutline { font-size: .9rem; }
+  button {
+    background: #3b82f6; border: 0; color: #fff; padding: 11px 18px;
+    border-radius: 8px; font: inherit; cursor: pointer; margin: 4px 6px 4px 0;
+  }
+  button[aria-pressed="true"] { background: #dc2626; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .cta { text-align: center; border-color: #3b82f6; }
+  .cta a {
+    display: inline-block; background: #3b82f6; color: #fff; text-decoration: none;
+    padding: 14px 28px; border-radius: 10px; font-weight: 700; margin-top: 8px;
+  }
+  .cta a:hover { background: #2563eb; }
+  kbd { background: #232838; border-radius: 4px; padding: 1px 6px; font-size: .85em; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid #232838; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: #8b93a7; font-weight: 600; }
+  a { color: #7aa2f7; }
+  .note { font-size: .8rem; }
+  @media (max-width: 560px) { .big { font-size: 1.9rem; } .card { padding: 14px; } }
+</style>
+</head>
+<body>
+
+<h1>Dot<span class="dot">·</span>Spend</h1>
+<p class="muted">Unattended cost estimator for always-on agents · runs 100% in your browser · by <b>vittoriali</b></p>
+
+<div class="card" role="region" aria-label="Estimator inputs">
+  <h2>What will your agent burn while you're away?</h2>
+  <div class="grid">
+    <div>
+      <label for="model">Model</label>
+      <select id="model">
+        <option value="gpt-6.1-sol" selected>gpt-6.1-sol — $2 in / $0.10 cached / $10 out per 1M</option>
+        <option value="gpt-6-astra">gpt-6-astra (dots run on this) — $10 in / $1 cached / $50 out per 1M</option>
+        <option value="gpt-6-sol">gpt-6-sol (previous gen) — $2 in / $0.20 cached / $10 out per 1M</option>
+      </select>
+    </div>
+    <div>
+      <label for="tpm">Token throughput: <span class="val" id="tpmV">8,000</span> tokens/min</label>
+      <input type="range" id="tpm" min="500" max="60000" step="500" value="8000" aria-describedby="tpmV">
+    </div>
+    <div>
+      <label for="hours">Hours unattended: <span class="val" id="hoursV">12</span> h</label>
+      <input type="range" id="hours" min="1" max="168" step="1" value="12" aria-describedby="hoursV">
+    </div>
+    <div>
+      <label for="cache">Cached input: <span class="val" id="cacheV">60</span>% <span class="muted">(prompt caching is why Sol is 95% cheaper on input)</span></label>
+      <input type="range" id="cache" min="0" max="95" step="5" value="60" aria-describedby="cacheV">
+    </div>
+    <div>
+      <label for="outp">Output share: <span class="val" id="outpV">20</span>% of tokens</label>
+      <input type="range" id="outp" min="5" max="60" step="5" value="20" aria-describedby="outpV">
+    </div>
+    <div>
+      <label for="cap">Your per-agent daily cap: <span class="val" id="capV">$25.00</span></label>
+      <input type="range" id="cap" min="5" max="500" step="5" value="25" aria-describedby="capV">
+    </div>
+  </div>
+</div>
+
+<div class="card" role="region" aria-label="Projection results">
+  <h2>Projected unattended bill</h2>
+  <p><span class="big" id="cost">$0.00</span> <span class="muted">over <span id="hoursN">12</span> h</span></p>
+  <div class="bar" aria-hidden="true"><div id="fill"></div></div>
+  <p class="cutline" id="cutline"></p>
+  <table aria-label="Token breakdown">
+    <thead><tr><th>Bucket</th><th>Tokens</th><th>USD</th></tr></thead>
+    <tbody>
+      <tr><td>Input (uncached)</td><td id="tIn">0</td><td id="cIn">$0.00</td></tr>
+      <tr><td>Input (cached)</td><td id="tCa">0</td><td id="cCa">$0.00</td></tr>
+      <tr><td>Output</td><td id="tOut">0</td><td id="cOut">$0.00</td></tr>
+    </tbody>
+  </table>
+  <p class="muted note">≈ <span id="perHour">$0.00</span>/h · <span id="perDay">$0.00</span>/day if it never sleeps.</p>
+</div>
+
+<div class="card" role="region" aria-label="Kill switch">
+  <h2>Kill switch</h2>
+  <p class="muted">The account-level safety net. While armed, <b>all</b> agent spend returns
+  <kbd>HTTP 402</kbd> — it overrides every per-agent cap, even soft-mode ones.</p>
+  <button id="kill" aria-pressed="false">Arm kill switch</button>
+  <p id="killState" class="green">disarmed — per-agent caps are enforcing</p>
+</div>
+
+<div class="card" role="region" aria-label="How it enforces">
+  <h2>How DotSpend enforces this for real</h2>
+  <ul>
+    <li><b>Pre-aggregated ledger</b> — one row per (agent, period). Budget checks are O(1), no matter how many tasks the dot runs.</li>
+    <li><b>Per-agent caps</b> — daily + hourly, per dot. Unknown agent? Fail closed: blocked by default, never silently allowed.</li>
+    <li><b>Hard cutoffs</b> — a breached cap raises <kbd>BudgetExceeded</kbd> → <kbd>HTTP 402</kbd>. The task stops; the bill can't grow.</li>
+    <li><b>Kill switch</b> — one call halts every agent at once. Wake up to a receipt, not a surprise.</li>
+    <li><b>One pricing file</b> — every rate lives in <kbd>pricing.py</kbd>. Update prices once; the whole kit follows.</li>
+  </ul>
+</div>
+
+<div class="card cta" role="region" aria-label="Get DotSpend">
+  <h2>Stop pricing your dots in hindsight</h2>
+  <p class="muted">The $49 kit: the guardrail backend (FastAPI), the spend-cap starter config,
+  the unattended-cost runbook, the per-agent budget policy, and the kill-switch incident template.</p>
+  <a href="https://vittoriali.gumroad.com/l/dotspend">Get DotSpend — $49 one-time</a>
+  <p class="muted note">Running the full agent pipeline? Pair it with
+  <a href="https://vittoriali.gumroad.com/l/controlcheck-playbook">ControlCheck</a> (audit your agent controls)
+  and <a href="https://vittoriali.gumroad.com/l/tbhigv">ShipSafe</a> (the full LLM guardrail starter).</p>
+</div>
+
+<p class="muted note">Prices: OpenAI DevDay 2026, Sep 29 (Sol $2/$0.10/$10 per 1M; Astra $10/$1/$50).
+Dots run on GPT-6 Astra with their own cloud computer + browser; first dot included on Pro/Business Premium.
+Projection is an estimate — real runs vary with reasoning effort and retries. by <b>vittoriali</b></p>
+
+<script>
+const RATES = {
+  "gpt-6.1-sol":  { input: 2,    cached: 0.10, output: 10, longAt: 272000, longIn: 4, longCached: 0.20, longOut: 15 },
+  "gpt-6-astra":   { input: 10,   cached: 1,    output: 50, longAt: null },
+  "gpt-6-sol":     { input: 2,    cached: 0.20, output: 10, longAt: null }
+};
+const M = 1e6;
+const $ = id => document.getElementById(id);
+const fmt$ = n => "$" + n.toFixed(2);
+const fmtN = n => Math.round(n).toLocaleString("en-US");
+
+function update() {
+  const model = $("model").value;
+  const tpm = +$("tpm").value, hours = +$("hours").value;
+  const cachePct = +$("cache").value, outPct = +$("outp").value;
+  const cap = +$("cap").value;
+  const r = RATES[model];
+
+  $("tpmV").textContent = fmtN(tpm);
+  $("hoursV").textContent = hours; $("hoursN").textContent = hours;
+  $("cacheV").textContent = cachePct; $("outpV").textContent = outPct;
+  $("capV").textContent = fmt$(cap);
+
+  const total = tpm * 60 * hours;
+  const outT = total * outPct / 100;
+  const inT = total - outT;
+  const caT = inT * cachePct / 100;
+  const unT = inT - caT;
+
+  let inRate = r.input, caRate = r.cached, outRate = r.output, long = false;
+  if (r.longAt && inT >= r.longAt) { // 272K-token cliff: whole request bills at 2x/1.5x
+    inRate = r.longIn; caRate = r.longCached; outRate = r.longOut; long = true;
+  }
+  const cUn = unT * inRate / M, cCa = caT * caRate / M, cOut = outT * outRate / M;
+  const cost = cUn + cCa + cOut;
+  const perHour = cost / hours;
+
+  $("cost").textContent = fmt$(cost);
+  $("tIn").textContent = fmtN(unT);  $("cIn").textContent = fmt$(cUn);
+  $("tCa").textContent = fmtN(caT);  $("cCa").textContent = fmt$(cCa);
+  $("tOut").textContent = fmtN(outT); $("cOut").textContent = fmt$(cOut);
+  $("perHour").textContent = fmt$(perHour);
+  $("perDay").textContent = fmt$(perHour * 24);
+
+  const pct = Math.min(100, cost / cap * 100);
+  $("fill").style.width = pct + "%";
+  const line = $("cutline");
+  if (cost >= cap) {
+    const cutAt = cap / perHour;
+    line.innerHTML = '<span class="red"><b>HTTP 402 — cap hit.</b></span> ' +
+      "A $" + cap.toFixed(2) + " daily cap would cut this run at <b>" + cutAt.toFixed(1) +
+      " h</b>, saving " + fmt$(cost - cap) + ". Without the guardrail it bills the full " + fmt$(cost) + ".";
+  } else {
+    line.innerHTML = '<span class="green"><b>Inside the cap</b></span> — ' +
+      "this run uses " + pct.toFixed(0) + "% of the $" + cap.toFixed(2) + " daily cap.";
+  }
+  if (long) {
+    line.innerHTML += ' <span class="amber note">(long-context pricing applies — prompt crossed 272K tokens)</span>';
+  }
+}
+["model","tpm","hours","cache","outp","cap"].forEach(id =>
+  $(id).addEventListener("input", update));
+
+$("kill").addEventListener("click", () => {
+  const btn = $("kill"), state = $("killState");
+  const armed = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", armed);
+  btn.textContent = armed ? "Disarm kill switch" : "Arm kill switch";
+  state.textContent = armed
+    ? "ARMED — all agent spend returns HTTP 402"
+    : "disarmed — per-agent caps are enforcing";
+  state.className = armed ? "red" : "green";
+});
+update();
+</script>
+</body>
+</html>
